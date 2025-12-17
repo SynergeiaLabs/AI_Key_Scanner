@@ -1,27 +1,60 @@
-# AI API Key Scanner
+# AI API Key Scanner – Prevent OpenAI, Anthropic & Google AI Key Leaks in GitHub PRs
 
-A GitHub Action that scans pull request diffs for exposed AI API keys from OpenAI, Anthropic, and Google AI. When keys are detected, it adds GitHub annotations, comments on the PR with a summary, and fails the workflow to prevent merging.
+A GitHub Action that **prevents leaked AI API keys before merge**.
+
+AI API Key Scanner scans **pull request diffs** for exposed **OpenAI, Anthropic, and Google AI API keys**, adds inline GitHub annotations, comments on the PR with a clear summary, and **fails the workflow to block merging** when a key is detected.
+
+This is a focused, low-noise guardrail designed specifically for teams using AI APIs.
+
+---
+
+## Why This Exists
+
+AI API keys are frequently copied into scripts, tests, and examples during development.  
+One accidental commit can lead to:
+
+- unexpected API charges  
+- emergency key rotation  
+- security incidents  
+- broken trust with customers or auditors  
+
+This action acts as a **preventive control** — it stops AI API keys from ever reaching `main`.
+
+---
 
 ## Features
 
-- 🔍 Scans PR diffs for AI API keys (OpenAI, Anthropic, Google AI)
-- 📝 Adds GitHub annotations for each detected key
-- 💬 Comments on PRs with a summary of findings
-- ❌ Fails the workflow when keys are detected
+- 🔍 Scans **PR diffs only** (added lines, not entire repos)
+- 🔐 Detects **OpenAI, Anthropic, and Google AI** API keys
+- 📝 Adds **inline GitHub annotations** with file + line number
+- 💬 Posts a **clear PR comment summary**
+- ❌ **Fails the workflow** to block merging when keys are found
 - ⚙️ Configurable ignore paths and allowlist regex patterns
-- 🚀 Built with TypeScript and Node.js 20
+- 🚀 Built with **TypeScript** and **Node.js 20**
+- 🧠 Designed to be **low-noise and deterministic**
+
+---
 
 ## Supported Key Types
 
-- **OpenAI**: `sk-` followed by alphanumeric characters (32+ chars)
-- **Anthropic**: `sk-ant-` followed by alphanumeric/dash/underscore (95+ chars)
-- **Google AI**: `AIza` followed by alphanumeric/dash/underscore (35 chars)
+- **OpenAI**  
+  `sk-...` or `sk-proj-...`
+
+- **Anthropic**  
+  `sk-ant-...`
+
+- **Google AI / Gemini / Vertex**  
+  `AIza...`
+
+> The scanner is intentionally opinionated and focused on AI providers.
+
+---
 
 ## Usage
 
-### Basic Usage
+### Basic Setup
 
-Add this to your `.github/workflows/ai-key-scanner.yml`:
+Add the following workflow to your repository:
 
 ```yaml
 name: AI Key Scanner
@@ -41,100 +74,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run AI Key Scanner
-        uses: ./
+      - name: Run AI API Key Scanner
+        uses: SynergeiaLabs/AI_Key_Scanner@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          config-path: .github/ai-key-scanner.yml
-```
-
-### Configuration
-
-Create a `.github/ai-key-scanner.yml` file in your repository to customize the scanner:
-
-```yaml
-# Paths to ignore when scanning (relative to repo root)
-# Uses simple substring matching (not glob patterns)
-ignorePaths:
-  - node_modules/
-  - dist/
-  - build/
-
-# Regular expressions to allowlist certain key patterns
-# Keys matching any of these regexes will be ignored
-allowlistRegex:
-  - "^test-.*"
-  - "^example-.*"
-```
-
-#### Configuration Options
-
-- `ignorePaths` (optional): Array of file path substrings to exclude from scanning. Uses simple substring matching (not glob patterns). If any part of the file path contains the substring, it will be ignored.
-- `allowlistRegex` (optional): Array of regular expression patterns. Any detected keys matching any of these patterns will be ignored
-
-### Inputs
-
-| Input | Description | Required | Default |
-|-------|-------------|----------|---------|
-| `github-token` | GitHub token for API access | Yes | - |
-| `config-path` | Path to configuration file | No | `.github/ai-key-scanner.yml` |
-
-## Development
-
-### Prerequisites
-
-- Node.js 20+
-- npm
-
-### Setup
-
-1. Install dependencies:
-```bash
-npm install
-```
-
-2. Build the action:
-```bash
-npm run build
-```
-
-This will:
-- Compile TypeScript to JavaScript
-- Bundle the code with `ncc` to `dist/index.js`
-- Generate source maps and license files
-
-### Project Structure
-
-```
-.
-├── src/
-│   └── index.ts          # Main action code
-├── dist/                 # Compiled output (generated)
-├── action.yml            # Action metadata
-├── package.json          # Dependencies and scripts
-├── tsconfig.json         # TypeScript configuration
-└── README.md            # This file
-```
-
-## How It Works
-
-1. The action triggers on pull request events
-2. Fetches the PR diff using GitHub API
-3. Parses the diff to extract added lines
-4. Scans each line for AI API key patterns
-5. Applies ignore paths and allowlist filters
-6. Creates GitHub annotations for each match
-7. Posts a summary comment on the PR
-8. Fails the workflow if any keys are found
-
-## Security Notes
-
-- **Never commit real API keys** to your repository, even in test files
-- If keys are detected, rotate them immediately
-- The scanner only checks PR diffs (added lines), not the entire codebase
-- Consider setting up branch protection rules to prevent bypassing the check
-
-## License
-
-MIT
-
