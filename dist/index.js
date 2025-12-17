@@ -1,6 +1,311 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 9709:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const fs = __importStar(__nccwpck_require__(9896));
+const yaml = __importStar(__nccwpck_require__(4281));
+// API key patterns
+const KEY_PATTERNS = {
+    openai: {
+        pattern: /sk-[a-zA-Z0-9]{32,}/,
+        name: 'OpenAI API Key'
+    },
+    anthropic: {
+        pattern: /sk-ant-[a-zA-Z0-9\-_]{95,}/,
+        name: 'Anthropic API Key'
+    },
+    google: {
+        pattern: /AIza[0-9A-Za-z\-_]{35}/,
+        name: 'Google AI API Key'
+    }
+};
+async function loadConfig(configPath) {
+    try {
+        if (fs.existsSync(configPath)) {
+            const configContent = fs.readFileSync(configPath, 'utf8');
+            const config = yaml.load(configContent);
+            return config || {};
+        }
+    }
+    catch (error) {
+        core.warning(`Failed to load config file: ${error}`);
+    }
+    return {};
+}
+function shouldIgnorePath(filePath, config) {
+    if (!config.ignorePaths || config.ignorePaths.length === 0) {
+        return false;
+    }
+    for (const ignorePath of config.ignorePaths) {
+        if (filePath.includes(ignorePath)) {
+            return true;
+        }
+    }
+    return false;
+}
+function matchesAllowlist(match, config) {
+    if (!config.allowlistRegex) {
+        return false;
+    }
+    try {
+        const regex = new RegExp(config.allowlistRegex);
+        return regex.test(match);
+    }
+    catch (error) {
+        core.warning(`Invalid allowlist regex: ${error}`);
+        return false;
+    }
+}
+function scanForKeys(content, filePath, lineMap, config) {
+    const matches = [];
+    const lines = content.split('\n');
+    for (let contentLineIndex = 0; contentLineIndex < lines.length; contentLineIndex++) {
+        const line = lines[contentLineIndex];
+        const actualLineNumber = lineMap.get(contentLineIndex) || contentLineIndex + 1;
+        for (const [key, { pattern, name }] of Object.entries(KEY_PATTERNS)) {
+            const regex = new RegExp(pattern.source, pattern.flags);
+            const lineMatches = line.matchAll(regex);
+            for (const match of lineMatches) {
+                const matchText = match[0];
+                // Check allowlist
+                if (matchesAllowlist(matchText, config)) {
+                    core.debug(`Key in ${filePath}:${actualLineNumber} matches allowlist, skipping`);
+                    continue;
+                }
+                matches.push({
+                    file: filePath,
+                    line: actualLineNumber,
+                    keyType: name,
+                    match: matchText.substring(0, 20) + '...' // Only show partial key
+                });
+            }
+        }
+    }
+    return matches;
+}
+async function getPRFiles(octokit, owner, repo, prNumber) {
+    const allFiles = [];
+    let page = 1;
+    const perPage = 100;
+    while (true) {
+        const { data: files } = await octokit.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: prNumber,
+            per_page: perPage,
+            page
+        });
+        allFiles.push(...files);
+        if (files.length < perPage) {
+            break;
+        }
+        page++;
+    }
+    return allFiles;
+}
+async function getPRDiff(octokit, owner, repo, prNumber) {
+    const files = await getPRFiles(octokit, owner, repo, prNumber);
+    let fullDiff = '';
+    for (const file of files) {
+        if (!file.patch) {
+            core.warning(`File ${file.filename} has no patch (likely too large), skipping`);
+            continue;
+        }
+        fullDiff += `--- a/${file.filename}\n+++ b/${file.filename}\n`;
+        fullDiff += file.patch;
+        fullDiff += '\n';
+    }
+    return fullDiff;
+}
+function parseDiff(diff) {
+    const files = new Map();
+    const lines = diff.split('\n');
+    let currentFile = '';
+    let currentContent = '';
+    let currentLineMap = new Map();
+    let contentLineIndex = 0;
+    let newLine = 0; // Current line number in the new file version
+    for (const line of lines) {
+        if (line.startsWith('--- a/')) {
+            if (currentFile && currentContent) {
+                files.set(currentFile, { content: currentContent, lineMap: currentLineMap });
+            }
+            currentFile = line.substring(6); // Remove '--- a/'
+            currentContent = '';
+            currentLineMap = new Map();
+            contentLineIndex = 0;
+            newLine = 0;
+        }
+        else if (line.startsWith('+++ b/')) {
+            // Skip, we already have the file from --- a/
+        }
+        else if (line.startsWith('@@')) {
+            // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+            const hunkMatch = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+            if (hunkMatch) {
+                newLine = parseInt(hunkMatch[1], 10); // newStart is the starting line number in the new file
+            }
+        }
+        else if (currentFile) {
+            const firstChar = line.charAt(0);
+            if (firstChar === '+') {
+                // Added line (not +++ header)
+                currentContent += line.substring(1) + '\n';
+                currentLineMap.set(contentLineIndex, newLine);
+                contentLineIndex++;
+                newLine++;
+            }
+            else if (firstChar === ' ') {
+                // Context line
+                newLine++;
+            }
+            else if (firstChar === '-') {
+                // Removed line (not --- header) - DO NOT increment newLine
+                // (only removed lines don't exist in the new file)
+            }
+        }
+    }
+    if (currentFile && currentContent) {
+        files.set(currentFile, { content: currentContent, lineMap: currentLineMap });
+    }
+    return files;
+}
+async function createPRComment(octokit, owner, repo, prNumber, matches) {
+    let comment = '## 🔒 AI API Key Scanner Results\n\n';
+    if (matches.length === 0) {
+        comment += '✅ No AI API keys detected in this PR.\n';
+    }
+    else {
+        comment += `⚠️ **${matches.length} AI API key(s) detected in this PR:**\n\n`;
+        // Group by file
+        const matchesByFile = new Map();
+        for (const match of matches) {
+            if (!matchesByFile.has(match.file)) {
+                matchesByFile.set(match.file, []);
+            }
+            matchesByFile.get(match.file).push(match);
+        }
+        for (const [file, fileMatches] of matchesByFile) {
+            comment += `### \`${file}\`\n\n`;
+            for (const match of fileMatches) {
+                comment += `- Line ${match.line}: ${match.keyType} detected (${match.match})\n`;
+            }
+            comment += '\n';
+        }
+        comment += '**Please remove these keys and rotate them immediately if they were committed.**\n';
+    }
+    await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body: comment
+    });
+}
+async function run() {
+    try {
+        const token = core.getInput('github-token', { required: true });
+        const configPath = core.getInput('config-path') || '.github/ai-key-scanner.yml';
+        const octokit = github.getOctokit(token);
+        const context = github.context;
+        if (context.eventName !== 'pull_request') {
+            core.setFailed('This action only works on pull_request events');
+            return;
+        }
+        const prNumber = context.payload.pull_request?.number;
+        if (!prNumber) {
+            core.setFailed('Could not determine PR number');
+            return;
+        }
+        const owner = context.repo.owner;
+        const repo = context.repo.repo;
+        core.info('Loading configuration...');
+        const config = await loadConfig(configPath);
+        core.info('Fetching PR diff...');
+        const diff = await getPRDiff(octokit, owner, repo, prNumber);
+        const files = parseDiff(diff);
+        core.info(`Scanning ${files.size} file(s) for AI API keys...`);
+        const allMatches = [];
+        for (const [filePath, fileData] of files) {
+            if (shouldIgnorePath(filePath, config)) {
+                core.debug(`Ignoring ${filePath} (matches ignorePaths)`);
+                continue;
+            }
+            const matches = scanForKeys(fileData.content, filePath, fileData.lineMap, config);
+            allMatches.push(...matches);
+            // Add annotations for each match
+            for (const match of matches) {
+                core.error(`Found ${match.keyType} in ${match.file} at line ${match.line}`, {
+                    file: match.file,
+                    startLine: match.line,
+                    endLine: match.line,
+                    title: `${match.keyType} detected`
+                });
+            }
+        }
+        // Create PR comment
+        core.info('Creating PR comment...');
+        await createPRComment(octokit, owner, repo, prNumber, allMatches);
+        if (allMatches.length > 0) {
+            core.setFailed(`Found ${allMatches.length} AI API key(s) in the PR. Please remove them and rotate the keys.`);
+        }
+        else {
+            core.info('No AI API keys detected. ✅');
+        }
+    }
+    catch (error) {
+        if (error instanceof Error) {
+            core.setFailed(error.message);
+        }
+        else {
+            core.setFailed('Unknown error occurred');
+        }
+    }
+}
+run();
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 4914:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -34036,284 +34341,6 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
-/***/ 9407:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-const core = __importStar(__nccwpck_require__(7484));
-const github = __importStar(__nccwpck_require__(3228));
-const fs = __importStar(__nccwpck_require__(9896));
-const yaml = __importStar(__nccwpck_require__(4281));
-// API key patterns
-const KEY_PATTERNS = {
-    openai: {
-        pattern: /sk-[a-zA-Z0-9]{32,}/,
-        name: 'OpenAI API Key'
-    },
-    anthropic: {
-        pattern: /sk-ant-[a-zA-Z0-9\-_]{95,}/,
-        name: 'Anthropic API Key'
-    },
-    google: {
-        pattern: /AIza[0-9A-Za-z\-_]{35}/,
-        name: 'Google AI API Key'
-    }
-};
-async function loadConfig(configPath) {
-    try {
-        if (fs.existsSync(configPath)) {
-            const configContent = fs.readFileSync(configPath, 'utf8');
-            const config = yaml.load(configContent);
-            return config || {};
-        }
-    }
-    catch (error) {
-        core.warning(`Failed to load config file: ${error}`);
-    }
-    return {};
-}
-function shouldIgnorePath(filePath, config) {
-    if (!config.ignorePaths || config.ignorePaths.length === 0) {
-        return false;
-    }
-    for (const ignorePath of config.ignorePaths) {
-        if (filePath.includes(ignorePath)) {
-            return true;
-        }
-    }
-    return false;
-}
-function matchesAllowlist(match, config) {
-    if (!config.allowlistRegex) {
-        return false;
-    }
-    try {
-        const regex = new RegExp(config.allowlistRegex);
-        return regex.test(match);
-    }
-    catch (error) {
-        core.warning(`Invalid allowlist regex: ${error}`);
-        return false;
-    }
-}
-function scanForKeys(content, filePath, lineMap, config) {
-    const matches = [];
-    const lines = content.split('\n');
-    for (let contentLineIndex = 0; contentLineIndex < lines.length; contentLineIndex++) {
-        const line = lines[contentLineIndex];
-        const actualLineNumber = lineMap.get(contentLineIndex) || contentLineIndex + 1;
-        for (const [key, { pattern, name }] of Object.entries(KEY_PATTERNS)) {
-            const regex = new RegExp(pattern.source, pattern.flags);
-            const lineMatches = line.matchAll(regex);
-            for (const match of lineMatches) {
-                const matchText = match[0];
-                // Check allowlist
-                if (matchesAllowlist(matchText, config)) {
-                    core.debug(`Key in ${filePath}:${actualLineNumber} matches allowlist, skipping`);
-                    continue;
-                }
-                matches.push({
-                    file: filePath,
-                    line: actualLineNumber,
-                    keyType: name,
-                    match: matchText.substring(0, 20) + '...' // Only show partial key
-                });
-            }
-        }
-    }
-    return matches;
-}
-async function getPRDiff(octokit, owner, repo, prNumber) {
-    const { data: files } = await octokit.rest.pulls.listFiles({
-        owner,
-        repo,
-        pull_number: prNumber
-    });
-    let fullDiff = '';
-    for (const file of files) {
-        fullDiff += `--- a/${file.filename}\n+++ b/${file.filename}\n`;
-        fullDiff += file.patch || '';
-        fullDiff += '\n';
-    }
-    return fullDiff;
-}
-function parseDiff(diff) {
-    const files = new Map();
-    const lines = diff.split('\n');
-    let currentFile = '';
-    let currentContent = '';
-    let currentLineMap = new Map();
-    let contentLineIndex = 0;
-    let currentFileLineNumber = 0;
-    for (const line of lines) {
-        if (line.startsWith('--- a/')) {
-            if (currentFile && currentContent) {
-                files.set(currentFile, { content: currentContent, lineMap: currentLineMap });
-            }
-            currentFile = line.substring(6); // Remove '--- a/'
-            currentContent = '';
-            currentLineMap = new Map();
-            contentLineIndex = 0;
-            currentFileLineNumber = 0;
-        }
-        else if (line.startsWith('+++ b/')) {
-            // Skip, we already have the file from --- a/
-        }
-        else if (line.startsWith('@@')) {
-            // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
-            const hunkMatch = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
-            if (hunkMatch) {
-                currentFileLineNumber = parseInt(hunkMatch[1], 10) - 1; // -1 because we'll increment before using
-            }
-        }
-        else if (currentFile) {
-            // Include added lines (lines starting with +)
-            if (line.startsWith('+') && !line.startsWith('+++')) {
-                currentFileLineNumber++;
-                currentContent += line.substring(1) + '\n';
-                currentLineMap.set(contentLineIndex, currentFileLineNumber);
-                contentLineIndex++;
-            }
-            else if (line.startsWith(' ') || line.startsWith('-')) {
-                // Context lines or removed lines - increment file line number but don't add to content
-                if (!line.startsWith('---') && !line.startsWith('+++')) {
-                    currentFileLineNumber++;
-                }
-            }
-        }
-    }
-    if (currentFile && currentContent) {
-        files.set(currentFile, { content: currentContent, lineMap: currentLineMap });
-    }
-    return files;
-}
-async function createPRComment(octokit, owner, repo, prNumber, matches) {
-    let comment = '## 🔒 AI API Key Scanner Results\n\n';
-    if (matches.length === 0) {
-        comment += '✅ No AI API keys detected in this PR.\n';
-    }
-    else {
-        comment += `⚠️ **${matches.length} AI API key(s) detected in this PR:**\n\n`;
-        // Group by file
-        const matchesByFile = new Map();
-        for (const match of matches) {
-            if (!matchesByFile.has(match.file)) {
-                matchesByFile.set(match.file, []);
-            }
-            matchesByFile.get(match.file).push(match);
-        }
-        for (const [file, fileMatches] of matchesByFile) {
-            comment += `### \`${file}\`\n\n`;
-            for (const match of fileMatches) {
-                comment += `- Line ${match.line}: ${match.keyType} detected (${match.match})\n`;
-            }
-            comment += '\n';
-        }
-        comment += '**Please remove these keys and rotate them immediately if they were committed.**\n';
-    }
-    await octokit.rest.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: comment
-    });
-}
-async function run() {
-    try {
-        const token = core.getInput('github-token', { required: true });
-        const configPath = core.getInput('config-path') || '.github/ai-key-scanner.yml';
-        const octokit = github.getOctokit(token);
-        const context = github.context;
-        if (context.eventName !== 'pull_request') {
-            core.setFailed('This action only works on pull_request events');
-            return;
-        }
-        const prNumber = context.payload.pull_request?.number;
-        if (!prNumber) {
-            core.setFailed('Could not determine PR number');
-            return;
-        }
-        const owner = context.repo.owner;
-        const repo = context.repo.repo;
-        core.info('Loading configuration...');
-        const config = await loadConfig(configPath);
-        core.info('Fetching PR diff...');
-        const diff = await getPRDiff(octokit, owner, repo, prNumber);
-        const files = parseDiff(diff);
-        core.info(`Scanning ${files.size} file(s) for AI API keys...`);
-        const allMatches = [];
-        for (const [filePath, fileData] of files) {
-            if (shouldIgnorePath(filePath, config)) {
-                core.debug(`Ignoring ${filePath} (matches ignorePaths)`);
-                continue;
-            }
-            const matches = scanForKeys(fileData.content, filePath, fileData.lineMap, config);
-            allMatches.push(...matches);
-            // Add annotations for each match
-            for (const match of matches) {
-                // Use workflow command syntax for annotations
-                core.error(`::error file=${match.file},line=${match.line}::Found ${match.keyType} in ${match.file} at line ${match.line}`);
-            }
-        }
-        // Create PR comment
-        core.info('Creating PR comment...');
-        await createPRComment(octokit, owner, repo, prNumber, allMatches);
-        if (allMatches.length > 0) {
-            core.setFailed(`Found ${allMatches.length} AI API key(s) in the PR. Please remove them and rotate the keys.`);
-        }
-        else {
-            core.info('No AI API keys detected. ✅');
-        }
-    }
-    catch (error) {
-        if (error instanceof Error) {
-            core.setFailed(error.message);
-        }
-        else {
-            core.setFailed('Unknown error occurred');
-        }
-    }
-}
-run();
-
-
-/***/ }),
-
 /***/ 2613:
 /***/ ((module) => {
 
@@ -36229,7 +36256,7 @@ module.exports = parseParams
 /******/ 	// startup
 /******/ 	// Load entry module and return exports
 /******/ 	// This entry module is referenced by other modules so it can't be inlined
-/******/ 	var __webpack_exports__ = __nccwpck_require__(9407);
+/******/ 	var __webpack_exports__ = __nccwpck_require__(9709);
 /******/ 	module.exports = __webpack_exports__;
 /******/ 	
 /******/ })()

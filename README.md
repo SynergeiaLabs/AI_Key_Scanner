@@ -54,11 +54,11 @@ Create a `.github/ai-key-scanner.yml` file in your repository to customize the s
 
 ```yaml
 # Paths to ignore when scanning (relative to repo root)
+# Uses simple substring matching (not glob patterns)
 ignorePaths:
   - node_modules/
   - dist/
   - build/
-  - "*.min.js"
 
 # Regular expression to allowlist certain key patterns
 # Keys matching this regex will be ignored
@@ -67,7 +67,7 @@ allowlistRegex: "^test-.*"
 
 #### Configuration Options
 
-- `ignorePaths` (optional): Array of file paths or patterns to exclude from scanning
+- `ignorePaths` (optional): Array of file path substrings to exclude from scanning. Uses simple substring matching (not glob patterns). If any part of the file path contains the substring, it will be ignored.
 - `allowlistRegex` (optional): Regular expression pattern. Any detected keys matching this pattern will be ignored
 
 ### Inputs
