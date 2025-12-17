@@ -1,0 +1,7 @@
+name: "CodeQL Configuration"
+
+# Exclude generated/bundled code from scanning
+paths-ignore:
+  - dist
+  - dist-tmp
+  - node_modules
