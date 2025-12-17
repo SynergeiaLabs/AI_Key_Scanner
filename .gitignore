@@ -1,8 +1,7 @@
 node_modules/
-dist/
 *.log
 .DS_Store
 .env
 *.tsbuildinfo
-licenses.txt
+# Note: dist/ is included for GitHub Actions - the bundled code needs to be committed
 
