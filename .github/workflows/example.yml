@@ -1,0 +1,23 @@
+name: AI Key Scanner Example
+
+on:
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run AI Key Scanner
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          config-path: .github/ai-key-scanner.yml
+

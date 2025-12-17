@@ -1,0 +1,18 @@
+# AI Key Scanner Configuration
+# Copy this file to .github/ai-key-scanner.yml and customize as needed
+
+# Paths to ignore when scanning (relative to repo root)
+ignorePaths:
+  - node_modules/
+  - dist/
+  - build/
+  - .git/
+  - vendor/
+  - "*.min.js"
+  - "*.bundle.js"
+
+# Regular expression to allowlist certain key patterns
+# Keys matching this regex will be ignored
+# Example: Allow keys in test files with specific prefix
+# allowlistRegex: "^test-.*"
+
