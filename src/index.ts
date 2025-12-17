@@ -5,7 +5,7 @@ import * as yaml from 'js-yaml';
 
 interface Config {
   ignorePaths?: string[];
-  allowlistRegex?: string;
+  allowlistRegex?: string[];
 }
 
 interface KeyMatch {
@@ -18,15 +18,15 @@ interface KeyMatch {
 // API key patterns
 const KEY_PATTERNS = {
   openai: {
-    pattern: /sk-[a-zA-Z0-9]{32,}/,
+    pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g,
     name: 'OpenAI API Key'
   },
   anthropic: {
-    pattern: /sk-ant-[a-zA-Z0-9\-_]{95,}/,
+    pattern: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
     name: 'Anthropic API Key'
   },
   google: {
-    pattern: /AIza[0-9A-Za-z\-_]{35}/,
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     name: 'Google AI API Key'
   }
 };
@@ -59,17 +59,22 @@ function shouldIgnorePath(filePath: string, config: Config): boolean {
 }
 
 function matchesAllowlist(match: string, config: Config): boolean {
-  if (!config.allowlistRegex) {
+  if (!config.allowlistRegex || config.allowlistRegex.length === 0) {
     return false;
   }
 
-  try {
-    const regex = new RegExp(config.allowlistRegex);
-    return regex.test(match);
-  } catch (error) {
-    core.warning(`Invalid allowlist regex: ${error}`);
-    return false;
+  for (const regexStr of config.allowlistRegex) {
+    try {
+      const regex = new RegExp(regexStr);
+      if (regex.test(match)) {
+        return true;
+      }
+    } catch (error) {
+      core.warning(`Invalid allowlist regex: ${regexStr} - ${error}`);
+    }
   }
+
+  return false;
 }
 
 function scanForKeys(
@@ -86,8 +91,9 @@ function scanForKeys(
     const actualLineNumber = lineMap.get(contentLineIndex) || contentLineIndex + 1;
     
     for (const [key, { pattern, name }] of Object.entries(KEY_PATTERNS)) {
-      const regex = new RegExp(pattern.source, pattern.flags);
-      const lineMatches = line.matchAll(regex);
+      // Reset regex lastIndex for each line (global regexes maintain state)
+      pattern.lastIndex = 0;
+      const lineMatches = line.matchAll(pattern);
 
       for (const match of lineMatches) {
         const matchText = match[0];
@@ -186,6 +192,11 @@ function parseDiff(diff: string): Map<string, FileContent> {
         newLine = parseInt(hunkMatch[1], 10); // newStart is the starting line number in the new file
       }
     } else if (currentFile) {
+      // Guard against diff headers appearing inside hunks
+      if (line.startsWith('+++ b/') || line.startsWith('--- a/')) {
+        continue;
+      }
+
       const firstChar = line.charAt(0);
       
       if (firstChar === '+') {
@@ -262,7 +273,7 @@ async function run(): Promise<void> {
     const context = github.context;
 
     if (context.eventName !== 'pull_request') {
-      core.setFailed('This action only works on pull_request events');
+      core.info('This action only works on pull_request events');
       return;
     }
 
