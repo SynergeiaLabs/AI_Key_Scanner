@@ -111,17 +111,42 @@ function scanForKeys(
   return matches;
 }
 
+async function getPRFiles(octokit: any, owner: string, repo: string, prNumber: number): Promise<any[]> {
+  const allFiles: any[] = [];
+  let page = 1;
+  const perPage = 100;
+
+  while (true) {
+    const { data: files } = await octokit.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: perPage,
+      page
+    });
+
+    allFiles.push(...files);
+
+    if (files.length < perPage) {
+      break;
+    }
+    page++;
+  }
+
+  return allFiles;
+}
+
 async function getPRDiff(octokit: any, owner: string, repo: string, prNumber: number): Promise<string> {
-  const { data: files } = await octokit.rest.pulls.listFiles({
-    owner,
-    repo,
-    pull_number: prNumber
-  });
+  const files = await getPRFiles(octokit, owner, repo, prNumber);
 
   let fullDiff = '';
   for (const file of files) {
+    if (!file.patch) {
+      core.warning(`File ${file.filename} has no patch (likely too large), skipping`);
+      continue;
+    }
     fullDiff += `--- a/${file.filename}\n+++ b/${file.filename}\n`;
-    fullDiff += file.patch || '';
+    fullDiff += file.patch;
     fullDiff += '\n';
   }
 
@@ -140,7 +165,7 @@ function parseDiff(diff: string): Map<string, FileContent> {
   let currentContent = '';
   let currentLineMap = new Map<number, number>();
   let contentLineIndex = 0;
-  let currentFileLineNumber = 0;
+  let newLine = 0; // Current line number in the new file version
 
   for (const line of lines) {
     if (line.startsWith('--- a/')) {
@@ -151,27 +176,30 @@ function parseDiff(diff: string): Map<string, FileContent> {
       currentContent = '';
       currentLineMap = new Map();
       contentLineIndex = 0;
-      currentFileLineNumber = 0;
+      newLine = 0;
     } else if (line.startsWith('+++ b/')) {
       // Skip, we already have the file from --- a/
     } else if (line.startsWith('@@')) {
-      // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+      // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
       const hunkMatch = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
       if (hunkMatch) {
-        currentFileLineNumber = parseInt(hunkMatch[1], 10) - 1; // -1 because we'll increment before using
+        newLine = parseInt(hunkMatch[1], 10); // newStart is the starting line number in the new file
       }
     } else if (currentFile) {
-      // Include added lines (lines starting with +)
-      if (line.startsWith('+') && !line.startsWith('+++')) {
-        currentFileLineNumber++;
+      const firstChar = line.charAt(0);
+      
+      if (firstChar === '+') {
+        // Added line (not +++ header)
         currentContent += line.substring(1) + '\n';
-        currentLineMap.set(contentLineIndex, currentFileLineNumber);
+        currentLineMap.set(contentLineIndex, newLine);
         contentLineIndex++;
-      } else if (line.startsWith(' ') || line.startsWith('-')) {
-        // Context lines or removed lines - increment file line number but don't add to content
-        if (!line.startsWith('---') && !line.startsWith('+++')) {
-          currentFileLineNumber++;
-        }
+        newLine++;
+      } else if (firstChar === ' ') {
+        // Context line
+        newLine++;
+      } else if (firstChar === '-') {
+        // Removed line (not --- header) - DO NOT increment newLine
+        // (only removed lines don't exist in the new file)
       }
     }
   }
@@ -268,8 +296,12 @@ async function run(): Promise<void> {
 
       // Add annotations for each match
       for (const match of matches) {
-        // Use workflow command syntax for annotations
-        core.error(`::error file=${match.file},line=${match.line}::Found ${match.keyType} in ${match.file} at line ${match.line}`);
+        core.error(`Found ${match.keyType} in ${match.file} at line ${match.line}`, {
+          file: match.file,
+          startLine: match.line,
+          endLine: match.line,
+          title: `${match.keyType} detected`
+        });
       }
     }
 

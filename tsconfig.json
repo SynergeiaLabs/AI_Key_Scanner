@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2020"],
-    "outDir": "./dist",
+    "lib": ["ES2022"],
+    "outDir": "./dist-tmp",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
@@ -15,6 +15,6 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "dist-tmp"]
 }
 
